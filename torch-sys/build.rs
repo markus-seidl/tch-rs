@@ -355,6 +355,57 @@ impl SystemInfo {
         }
     }
 
+    // PyTorch 2.13.0's bundled headers need C++20 to build cleanly on MSVC:
+    // a few inline functions under `torch/csrc/api/include` compare two
+    // `IntArrayRef` with `==`, which is genuinely ambiguous under C++17
+    // (MSVC can't decide between `HeaderOnlyArrayRef::operator==` and
+    // `OptionalArrayRef::operator==`; this is only resolved by C++20's
+    // reversed-candidate lookup rules, see pytorch#185379 and
+    // pytorch#185421), and a couple of other headers use C++20-only syntax
+    // outright (designated initializers, default bit-field member
+    // initializers). This reproduces on every MSVC toolset we tried
+    // (19.44 and 19.51), so it isn't specific to one compiler release.
+    //
+    // MSVC has supported `/std:c++20` since VS2019 16.11 (MSVC 19.29), so
+    // use it there; anything older can't build this libtorch release at
+    // all on Windows. Non-MSVC compilers (e.g. clang-cl) keep the previous
+    // C++17 flag.
+    fn msvc_cxx_std_flag(builder: &cc::Build) -> &'static str {
+        const MIN_MSVC_FOR_CXX20: (u32, u32) = (19, 29);
+
+        let tool = builder.get_compiler();
+        if !tool.is_like_msvc() {
+            return "/std:c++17";
+        }
+        // Run cl.exe directly (not `tool.to_command()`, which bakes in `-nologo`
+        // and suppresses the version banner we need) so it prints its version
+        // banner to stderr and nothing else.
+        let mut cmd = std::process::Command::new(tool.path());
+        for (key, value) in tool.env() {
+            cmd.env(key, value);
+        }
+        let Ok(output) = cmd.output() else { return "/std:c++17" };
+        let banner = String::from_utf8_lossy(&output.stderr);
+        let version = banner.lines().find_map(|line| {
+            let version = line.split("Compiler Version ").nth(1)?;
+            let mut parts = version.split_whitespace().next()?.split('.');
+            let major = parts.next()?.parse::<u32>().ok()?;
+            let minor = parts.next()?.parse::<u32>().ok()?;
+            Some((major, minor))
+        });
+        match version {
+            Some(version) if version >= MIN_MSVC_FOR_CXX20 => "/std:c++20",
+            Some((major, minor)) => panic!(
+                "MSVC {major}.{minor} is too old to build libtorch {TORCH_VERSION}'s headers \
+                 on Windows (this requires C++20 support, available since MSVC 19.29 / \
+                 VS2019 16.11). Please upgrade your Visual Studio / Build Tools installation."
+            ),
+            // Couldn't determine the version (e.g. unexpected cl.exe output); fall back to
+            // the flag this crate has always used rather than failing outright.
+            None => "/std:c++17",
+        }
+    }
+
     fn make(&self) {
         println!("cargo:rerun-if-changed=libtch/torch_python.cpp");
         println!("cargo:rerun-if-changed=libtch/torch_python.h");
@@ -392,12 +443,11 @@ impl SystemInfo {
                 // TODO: Pass "/link" "LIBPATH:{}" to cl.exe in order to emulate rpath.
                 //       Not yet supported by cc=rs.
                 //       https://github.com/alexcrichton/cc-rs/issues/323
-                cc::Build::new()
-                    .cpp(true)
-                    .pic(true)
-                    .warnings(false)
-                    .includes(&self.libtorch_include_dirs)
-                    .flag("/std:c++17")
+                let mut builder = cc::Build::new();
+                builder.cpp(true).pic(true).warnings(false).includes(&self.libtorch_include_dirs);
+                let cxx_std = Self::msvc_cxx_std_flag(&builder);
+                builder
+                    .flag(cxx_std)
                     .flag("/p:DefineConstants=GLOG_USE_GLOG_EXPORT")
                     .files(&c_files)
                     .compile("tch");
