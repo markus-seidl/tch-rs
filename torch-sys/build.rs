@@ -332,6 +332,7 @@ impl SystemInfo {
             };
 
                 let filename = libtorch_dir.join(format!("v{TORCH_VERSION}.zip"));
+                println!("cargo:warning=Downloading libtorch {TORCH_VERSION} ({device}) from {libtorch_url}");
                 download(&libtorch_url, &filename)?;
                 extract(&filename, &libtorch_dir)?;
             }
