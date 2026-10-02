@@ -309,17 +309,8 @@ impl SystemInfo {
                 fs::create_dir(&libtorch_dir).unwrap_or_default();
                 let libtorch_url = match os {
                 Os::Linux => format!(
-                    "https://download.pytorch.org/libtorch/{}/libtorch-shared-with-deps-{}{}.zip",
-                    device, TORCH_VERSION, match device.as_ref() {
-                        "cpu" => "%2Bcpu",
-                        "cu118" => "%2Bcu118",
-                        "cu121" => "%2Bcu121",
-                        "cu124" => "%2Bcu124",
-                        "cu126" => "%2Bcu126",
-                        "cu128" => "%2Bcu128",
-                        "cu132" => "%2Bcu132",
-                        _ => anyhow::bail!("unsupported device {device}, TORCH_CUDA_VERSION may be set incorrectly?"),
-                    }
+                    "https://download.pytorch.org/libtorch/{}/libtorch-shared-with-deps-{}%2B{}.zip",
+                    device, TORCH_VERSION, device
                 ),
                 Os::Macos => {
                     if env::var("CARGO_CFG_TARGET_ARCH") == Ok(String::from("aarch64")) {
@@ -336,17 +327,8 @@ impl SystemInfo {
                     }
                 },
                 Os::Windows => format!(
-                    "https://download.pytorch.org/libtorch/{}/libtorch-win-shared-with-deps-{}{}.zip",
-                    device, TORCH_VERSION, match device.as_ref() {
-                        "cpu" => "%2Bcpu",
-                        "cu118" => "%2Bcu118",
-                        "cu121" => "%2Bcu121",
-                        "cu124" => "%2Bcu124",
-                        "cu126" => "%2Bcu126",
-                        "cu128" => "%2Bcu128",
-                        "cu132" => "%2Bcu132",
-                        _ => ""
-                    }),
+                    "https://download.pytorch.org/libtorch/{}/libtorch-win-shared-with-deps-{}%2B{}.zip",
+                    device, TORCH_VERSION, device),
             };
 
                 let filename = libtorch_dir.join(format!("v{TORCH_VERSION}.zip"));
